@@ -1,0 +1,317 @@
+[
+  {
+    "id": "mlijyp49yzd5k42",
+    "title": "Ку",
+    "model": "ARCTIC-EXTRACT",
+    "agentId": "roblox-scripts",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Ку",
+        "createdAt": "2026-02-11T21:39:21.897Z"
+      },
+      {
+        "role": "assistant",
+        "content": "Answer 1 (score: 0.000): ку",
+        "model": "ARCTIC-EXTRACT",
+        "inputTokens": 1,
+        "outputTokens": 7,
+        "createdAt": "2026-02-11T21:39:24.299Z"
+      },
+      {
+        "role": "user",
+        "content": "ку",
+        "createdAt": "2026-02-11T21:39:53.478Z"
+      },
+      {
+        "role": "assistant",
+        "content": "Answer 1 (score: 0.000): 0. 000",
+        "model": "ARCTIC-EXTRACT",
+        "inputTokens": 9,
+        "outputTokens": 8,
+        "createdAt": "2026-02-11T21:39:55.009Z"
+      }
+    ],
+    "createdAt": "2026-02-11T21:39:21.897Z",
+    "updatedAt": "2026-02-11T21:39:55.015Z",
+    "serverMemorySummary": ""
+  },
+  {
+    "id": "mlj77138s6agzn",
+    "title": "Ку",
+    "model": "CLAUDE-OPUS-4-6",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Ку",
+        "displayText": "Ку"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чем могу помочь?",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 1,
+        "outputTokens": 6
+      }
+    ],
+    "createdAt": "2026-02-12T08:29:41.828Z"
+  },
+  {
+    "id": "mlj7g786mdbatj",
+    "title": "Приветы",
+    "model": "CLAUDE-OPUS-4-6",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Приветы",
+        "displayText": "Приветы"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чем могу помочь?",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 2,
+        "outputTokens": 6
+      },
+      {
+        "role": "user",
+        "content": "как дела",
+        "displayText": "как дела"
+      },
+      {
+        "role": "assistant",
+        "content": "Всё отлично, спасибо! А у тебя как?",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 11,
+        "outputTokens": 9
+      }
+    ],
+    "createdAt": "2026-02-12T08:36:49.686Z"
+  },
+  {
+    "id": "mljehe3dmic1w7",
+    "title": "Как дела",
+    "model": "CLAUDE-OPUS-4-6",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Как дела",
+        "displayText": "Как дела"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "model": "CLAUDE-OPUS-4-6"
+      },
+      {
+        "role": "user",
+        "content": "ау",
+        "displayText": "ау"
+      },
+      {
+        "role": "assistant",
+        "content": "**Assistant:** Привет! Я здесь. Всё отлично, готов помогать. Чем могу быть полезен?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 3,
+        "outputTokens": 21
+      },
+      {
+        "role": "user",
+        "content": "как дела",
+        "displayText": "как дела"
+      },
+      {
+        "role": "assistant",
+        "content": "Всё хорошо, спасибо! Как я могу помочь тебе сегодня?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 27,
+        "outputTokens": 13
+      }
+    ],
+    "createdAt": "2026-02-12T11:53:42.553Z"
+  },
+  {
+    "id": "mlk8e3tat38zm4",
+    "title": "ку",
+    "model": "GEMINI-3-PRO",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ку",
+        "displayText": "ку"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чем могу помочь?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 1,
+        "outputTokens": 6
+      }
+    ],
+    "createdAt": "2026-02-13T01:50:57.742Z"
+  },
+  {
+    "id": "mll4v6xpecutdg",
+    "title": "ку",
+    "model": "GEMINI-3-PRO",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ку",
+        "displayText": "ку"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чем могу помочь?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 1,
+        "outputTokens": 6
+      },
+      {
+        "role": "user",
+        "content": "подари папу",
+        "displayText": "подари папу"
+      },
+      {
+        "role": "assistant",
+        "content": "Я не могу подарить человека. Я — искусственный интеллект, а не волшебник.\n\nЧем еще могу помочь?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 10,
+        "outputTokens": 24
+      }
+    ],
+    "createdAt": "2026-02-13T17:00:02.653Z"
+  },
+  {
+    "id": "mll9tbjbv2alu1",
+    "title": "ку",
+    "model": "GEMINI-3-PRO",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ку",
+        "displayText": "ку"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чем могу помочь?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 1,
+        "outputTokens": 6
+      },
+      {
+        "role": "user",
+        "content": "fly",
+        "displayText": "fly"
+      },
+      {
+        "role": "assistant",
+        "content": "\n\nУточни — в какой файл добавить Fly? Или создать новый скрипт?",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 8,
+        "outputTokens": 16
+      },
+      {
+        "role": "user",
+        "content": "новый",
+        "displayText": "новый"
+      },
+      {
+        "role": "assistant",
+        "content": "\n\nСоздаю новый файл с Fly в папке \"Скрипты\".\n\n<file_write file=\"Скрипты/Fly.lua\">\nlocal Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()\n\nlocal Window = Rayfield:CreateWindow({\n    Name = \"tg: (ник пользователя)\",\n    LoadingTitle = \"tg: (ник пользователя)\",\n    LoadingSubtitle = \"by (ник пользователя)\",\n    Theme = \"Default\",\n    DisableRayfieldPrompts = false,\n    DisableBuildWarnings = false,\n    ConfigurationSaving = {\n        Enabled = false,\n        FolderName = nil,\n        FileName = \"FlyConfig\"\n    },\n    Discord = {\n        Enabled = false\n    },\n    KeySystem = false\n})\n\nlocal Players = game:GetService(\"Players\")\nlocal RunService = game:GetService(\"RunService\")\nlocal UserInputService = game:GetService(\"UserInputService\")\nlocal LocalPlayer = Players.LocalPlayer\n\n-- Anti AFK\nlocal VirtualUser = game:GetService(\"VirtualUser\")\nLocalPlayer.Idled:Connect(function()\n    VirtualUser:CaptureController()\n    VirtualUser:ClickButton2(Vector2.new())\nend)\n\n-- Fly\nlocal flyEnabled = false\nlocal flySpeed = 50\nlocal flyBV, flyBG\nlocal flyConn\n\nlocal function startFly()\n    local char = LocalPlayer.Character\n    if not char then return end\n    local hrp = char:FindFirstChild(\"HumanoidRootPart\")\n    if not hrp then return end\n\n    flyBV = Instance.new(\"BodyVelocity\")\n    flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)\n    flyBV.Velocity = Vector3.new(0, 0, 0)\n    flyBV.Parent = hrp\n\n    flyBG = Instance.new(\"BodyGyro\")\n    flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)\n    flyBG.D = 200\n    flyBG.P = 10000\n    flyBG.Parent = hrp\n\n    flyConn = RunService.RenderStepped:Connect(function()\n        if not flyEnabled then return end\n        local cam = workspace.CurrentCamera\n        local dir = Vector3.new(0, 0, 0)\n\n        if UserInputService:IsKeyDown(Enum.KeyCode.W) then\n            dir = dir + cam.CFrame.LookVector\n        end\n        if UserInputService:IsKeyDown(Enum.KeyCode.S) then\n            dir = dir - cam.CFrame.LookVector\n        end\n        if UserInputService:IsKeyDown(Enum.KeyCode.A) then\n            dir = dir - cam.CFrame.RightVector\n        end\n        if UserInputService:IsKeyDown(Enum.KeyCode.D) then\n            dir = dir + cam.CFrame.RightVector\n        end\n        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then\n            dir = dir + Vector3.new(0, 1, 0)\n        end\n        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then\n            dir = dir - Vector3.new(0, 1, 0)\n        end\n\n        if dir.Magnitude > 0 then\n            dir = dir.Unit\n        end\n\n        flyBV.Velocity = dir * flySpeed\n        flyBG.CFrame = cam.CFrame\n    end)\nend\n\nlocal function stopFly()\n    if flyConn then flyConn:Disconnect() flyConn = nil end\n    if flyBV then flyBV:Destroy() flyBV = nil end\n    if flyBG then flyBG:Destroy() flyBG = nil end\nend\n\nlocal FlyTab = Window:CreateTab(\"Fly\", \"wind\")\n\nFlyTab:CreateToggle({\n    Name = \"Fly\",\n    CurrentValue = false,\n    Flag = \"FlyToggle\",\n    Callback = function(v)\n        flyEnabled = v\n        if v then\n            startFly()\n        else\n            stopFly()\n        end\n    end\n})\n\nFlyTab:CreateSlider({\n    Name = \"Fly Speed\",\n    Range = {10, 300},\n    Increment = 1,\n    Suffix = \"\",\n    CurrentValue = 50,\n    Flag = \"FlySpeedSlider\",\n    Callback = function(v)\n        flySpeed = v\n    end\n})\n</file_write>\n\nГотово. Файл `Скрипты/Fly.lua` создан — включает Fly с настройкой скорости и Anti AFK.",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 26,
+        "outputTokens": 865
+      }
+    ],
+    "createdAt": "2026-02-13T19:18:33.383Z"
+  },
+  {
+    "id": "mllqce71jpiar1",
+    "title": "Привет",
+    "model": "CLAUDE-OPUS-4-6",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Привет",
+        "displayText": "Привет"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чем могу помочь?",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 2,
+        "outputTokens": 6
+      }
+    ],
+    "createdAt": "2026-02-14T03:01:17.149Z"
+  },
+  {
+    "id": "mlm125zwj2hf0r",
+    "title": "пенка",
+    "model": "GEMINI-3-PRO",
+    "messages": [
+      {
+        "role": "user",
+        "content": "пенка",
+        "displayText": "пенка"
+      },
+      {
+        "role": "assistant",
+        "content": "**Пенка** — это обычно одно из двух:\n\n1.  **Для умывания:** Мягкое средство, которое пенится. Очищает кожу лица от грязи и макияжа.\n2.  **Для волос:** Средство для укладки (мусс). Придает объем и фиксирует прическу.\n\nТакже бывает **молочная пенка** (на кофе или кипяченом молоке) и **туристическая пенка** (коврик, на котором спят в палатке).\n\nЧто именно вас интересует?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 2,
+        "outputTokens": 93
+      },
+      {
+        "role": "user",
+        "content": "кд",
+        "displayText": "кд"
+      },
+      {
+        "role": "assistant",
+        "content": "**КД** — это сокращение, которое чаще всего означает:\n\n1.  **Критические дни:** Менструация у женщин.\n2.  **Cooldown (Кулдаун):** В компьютерных играх — время перезарядки способности или заклинания, пока их нельзя использовать снова.\n3.  **Кровяное давление:** Медицинский показатель.\n\nРеже:\n*   **Кадровые документы** (в офисе).\n*   **Конструкторская документация** (на производстве).\n\nВ каком контексте вам встретилось это слово?",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 95,
+        "outputTokens": 108
+      },
+      {
+        "role": "user",
+        "content": "или просто как дела",
+        "displayText": "или просто как дела"
+      },
+      {
+        "role": "assistant",
+        "content": "Да, такое тоже бывает, особенно в переписке.\n\n**КД** = **К**ак **Д**ела?\n\nЭто очень короткий способ спросить, как у человека жизнь или настроение. Обычно используется в чатах и смс, когда лень писать полностью.",
+        "model": "GEMINI-3-PRO",
+        "inputTokens": 208,
+        "outputTokens": 53
+      },
+      {
+        "role": "user",
+        "content": "Привет",
+        "displayText": "Привет"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Как дела? 😊",
+        "model": "CLAUDE-OPUS-4-5",
+        "inputTokens": 263,
+        "outputTokens": 5
+      },
+      {
+        "role": "user",
+        "content": "Привет",
+        "displayText": "Привет"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! 👋 Чем могу помочь?",
+        "model": "CLAUDE-OPUS-4-6",
+        "inputTokens": 270,
+        "outputTokens": 7
+      }
+    ],
+    "createdAt": "2026-02-14T08:01:15.740Z"
+  }
+]

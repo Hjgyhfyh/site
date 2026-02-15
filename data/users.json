@@ -1,0 +1,10 @@
+﻿{
+    "users":  [
+                  {
+                      "id":  "1f3251a8-6303-425b-9e05-e6668b9a827a",
+                      "username":  "godlimaster",
+                      "passwordHash":  "scrypt:4d37703947ea374481af2cfb462a8dee:7c866a5cc38fe3c4f12f7b7bc6d838c084185e1a17e19a33fb93f3426c653f4ba672f35ec99437e330c839ed3365b013946f6626d43dcac79ffee9786ab68a9e",
+                      "createdAt":  "2026-02-11T21:39:02.251Z"
+                  }
+              ]
+}

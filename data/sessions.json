@@ -1,0 +1,53 @@
+{
+  "sessions": [
+    {
+      "sid": "ec1f26e9-900c-4123-bfa0-2a1bb2b208df",
+      "userId": "52acdd92-ea6a-4a85-affe-297e82b5c708",
+      "username": "uazr8ml68",
+      "createdAt": "2026-02-12T07:57:46.265Z",
+      "expiresAt": "2026-03-14T07:57:46.265Z"
+    },
+    {
+      "sid": "3ddf97fa-0a0a-4855-98dc-132468fb3b11",
+      "userId": "ca444218-4e4e-4f5e-9573-632fbfea865d",
+      "username": "uc7r7gqjr",
+      "createdAt": "2026-02-12T08:03:05.292Z",
+      "expiresAt": "2026-03-14T08:03:05.292Z"
+    },
+    {
+      "sid": "183b9fd5-c4cc-4473-95a8-b7b64bc1d29b",
+      "userId": "3713fc74-d571-4ac9-afca-38143a36500a",
+      "username": "uy4209qyy",
+      "createdAt": "2026-02-12T08:04:06.732Z",
+      "expiresAt": "2026-03-14T08:04:06.732Z"
+    },
+    {
+      "sid": "a76b8f74-1173-4ed0-ae1f-6bd5106aeb8b",
+      "userId": "0b69013e-26e2-4d46-96e3-04c9d6276206",
+      "username": "uqf344aj9",
+      "createdAt": "2026-02-12T08:05:51.215Z",
+      "expiresAt": "2026-03-14T08:05:51.215Z"
+    },
+    {
+      "sid": "23160fdd-82dc-481a-9ba2-8ec34589ab20",
+      "userId": "3b8b8191-b1db-4a4e-af99-6e09288d3801",
+      "username": "uqjmlzjt",
+      "createdAt": "2026-02-12T08:12:54.496Z",
+      "expiresAt": "2026-03-14T08:12:54.496Z"
+    },
+    {
+      "sid": "5a1946f1-2e67-4c78-a725-dc4b0f9c1967",
+      "userId": "fa71f159-1e54-4c55-85f5-12fed950750e",
+      "username": "utlph7fsy",
+      "createdAt": "2026-02-12T08:19:20.375Z",
+      "expiresAt": "2026-03-14T08:19:20.375Z"
+    },
+    {
+      "sid": "ffee4954-5a69-4aa8-900e-089f6475532c",
+      "userId": "1f3251a8-6303-425b-9e05-e6668b9a827a",
+      "username": "godlimaster",
+      "createdAt": "2026-02-13T19:20:09.153Z",
+      "expiresAt": "2026-03-15T19:20:09.153Z"
+    }
+  ]
+}

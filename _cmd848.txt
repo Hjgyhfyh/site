@@ -1,0 +1,611 @@
+﻿@'
+(() => {
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+    const ROOT_API = (window.location.pathname.startsWith('/ai') ? '/ai' : '') + '/api';
+
+    const makeId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+
+    const esc = (value) =>
+        String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+    async function apiFetch(path, options = {}) {
+        const opts = { ...options };
+        const hasBody = opts.body != null;
+        opts.credentials = 'include';
+        opts.headers = {
+            ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+            ...(opts.headers || {}),
+        };
+
+        const response = await fetch(ROOT_API + path, opts);
+        const contentType = response.headers.get('content-type') || '';
+        let data = null;
+
+        if (contentType.includes('application/json')) {
+            data = await response.json().catch(() => null);
+        } else {
+            data = await response.text().catch(() => '');
+        }
+
+        return { response, data };
+    }
+
+    function sortChats(chats) {
+        return [...(Array.isArray(chats) ? chats : [])].sort((a, b) => {
+            const aTs = new Date(a.updatedAt || a.createdAt || 0).getTime();
+            const bTs = new Date(b.updatedAt || b.createdAt || 0).getTime();
+            return bTs - aTs;
+        });
+    }
+
+    function chatTitle(chat) {
+        if (!chat) return 'РќРѕРІС‹Р№ С‡Р°С‚';
+        if (chat.title && String(chat.title).trim()) return String(chat.title).trim();
+        const firstUser = Array.isArray(chat.messages) ? chat.messages.find((m) => m && m.role === 'user') : null;
+        if (!firstUser) return 'РќРѕРІС‹Р№ С‡Р°С‚';
+        const line = String(firstUser.content || '').replace(/\s+/g, ' ').trim();
+        return line.slice(0, 64) || 'РќРѕРІС‹Р№ С‡Р°С‚';
+    }
+
+    function formatWhen(value) {
+        const d = new Date(value || Date.now());
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toLocaleString('ru-RU', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    }
+
+    function LoadingScreen() {
+        return (
+            <div className="auth-shell">
+                <div className="auth-card auth-body text-sm text-gray-300">Р—Р°РіСЂСѓР·РєР°...</div>
+            </div>
+        );
+    }
+
+    function AuthScreen({ mode, setMode, username, setUsername, password, setPassword, onSubmit, loading, error }) {
+        return (
+            <div className="auth-shell">
+                <div className="auth-card">
+                    <div className="auth-tabs">
+                        <button className={'auth-tab ' + (mode === 'login' ? 'active' : '')} onClick={() => setMode('login')}>Р’С…РѕРґ</button>
+                        <button className={'auth-tab ' + (mode === 'register' ? 'active' : '')} onClick={() => setMode('register')}>Р РµРіРёСЃС‚СЂР°С†РёСЏ</button>
+                    </div>
+                    <form className="auth-body" onSubmit={onSubmit}>
+                        {error ? <div className="auth-error">{error}</div> : null}
+                        <input className="auth-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Р›РѕРіРёРЅ" autoComplete="username" />
+                        <input className="auth-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="РџР°СЂРѕР»СЊ" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
+                        <button className="auth-submit" type="submit" disabled={loading}>{loading ? 'РџРѕРґРѕР¶РґРёС‚Рµ...' : mode === 'login' ? 'Р’РѕР№С‚Рё' : 'РЎРѕР·РґР°С‚СЊ Р°РєРєР°СѓРЅС‚'}</button>
+                        <div className="text-xs text-gray-500 mt-3">РџР°СЂРѕР»СЊ С…СЂР°РЅРёС‚СЃСЏ РІ С…СЌС€РёСЂРѕРІР°РЅРЅРѕРј РІРёРґРµ Рё РЅРµ СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ РІ РѕС‚РєСЂС‹С‚РѕРј С‚РµРєСЃС‚Рµ.</div>
+                    </form>
+                </div>
+            </div>
+        );
+    }
+
+    function SettingsModal({ draft, setDraft, agents, saving, onClose, onSave }) {
+        return (
+            <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+                <div className="w-full max-w-xl rounded-2xl border border-arena-border bg-[#101010]" onClick={(e) => e.stopPropagation()}>
+                    <div className="px-4 py-3 border-b border-arena-border flex items-center justify-between">
+                        <div className="text-sm font-semibold text-gray-200">РРЅСЃС‚СЂСѓРєС†РёРё РР</div>
+                        <button className="text-xs text-gray-500 hover:text-gray-200" onClick={onClose}>Р—Р°РєСЂС‹С‚СЊ</button>
+                    </div>
+                    <div className="p-4">
+                        <label className="text-xs text-gray-400 block mb-2">Р“Р»РѕР±Р°Р»СЊРЅС‹Рµ РёРЅСЃС‚СЂСѓРєС†РёРё (РґР»СЏ РІСЃРµС… С‡Р°С‚РѕРІ)</label>
+                        <textarea
+                            className="settings-textarea"
+                            value={draft.globalInstructions}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, globalInstructions: e.target.value }))}
+                            placeholder="РћРїРёС€РёС‚Рµ СЃС‚РёР»СЊ, С„РѕСЂРјР°С‚ Рё РїСЂР°РІРёР»Р° РѕС‚РІРµС‚РѕРІ РР"
+                        />
+                        <label className="text-xs text-gray-400 block mt-4 mb-2">РђРіРµРЅС‚ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</label>
+                        <select
+                            className="auth-input mb-0"
+                            value={draft.defaultAgentId}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, defaultAgentId: e.target.value }))}
+                        >
+                            <option value="">Р‘РµР· Р°РіРµРЅС‚Р°</option>
+                            {agents.map((a) => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                        </select>
+                        <div className="mt-4 flex items-center justify-end gap-2">
+                            <button className="px-3 py-2 rounded-lg border border-arena-border text-xs text-gray-400 hover:text-gray-200" onClick={onClose}>РћС‚РјРµРЅР°</button>
+                            <button className="settings-save" disabled={saving} onClick={onSave}>{saving ? 'РЎРѕС…СЂР°РЅРµРЅРёРµ...' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    function EnhancedArenaApp() {
+        const [booting, setBooting] = useState(true);
+        const [user, setUser] = useState(null);
+
+        const [authMode, setAuthMode] = useState('login');
+        const [authUsername, setAuthUsername] = useState('');
+        const [authPassword, setAuthPassword] = useState('');
+        const [authLoading, setAuthLoading] = useState(false);
+        const [authError, setAuthError] = useState('');
+
+        const [models, setModels] = useState([]);
+        const [agents, setAgents] = useState([]);
+        const [settings, setSettings] = useState({ globalInstructions: '', defaultAgentId: '' });
+        const [settingsDraft, setSettingsDraft] = useState({ globalInstructions: '', defaultAgentId: '' });
+        const [settingsOpen, setSettingsOpen] = useState(false);
+        const [settingsSaving, setSettingsSaving] = useState(false);
+
+        const [chats, setChats] = useState([]);
+        const [activeChatId, setActiveChatId] = useState('');
+        const [selectedModel, setSelectedModel] = useState('');
+        const [activeAgentId, setActiveAgentId] = useState('');
+
+        const [input, setInput] = useState('');
+        const [sending, setSending] = useState(false);
+        const [error, setError] = useState('');
+        const [notice, setNotice] = useState('');
+
+        const messagesEndRef = useRef(null);
+
+        const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
+        const activeAgent = useMemo(() => agents.find((a) => a.id === activeAgentId) || null, [agents, activeAgentId]);
+
+        const loadAppData = useCallback(async () => {
+            const [modelsResult, chatsResult, agentsResult, settingsResult] = await Promise.all([
+                apiFetch('/models'),
+                apiFetch('/chats'),
+                apiFetch('/agents'),
+                apiFetch('/user/settings'),
+            ]);
+
+            if (modelsResult.response.status === 401 || chatsResult.response.status === 401) {
+                setUser(null);
+                return;
+            }
+
+            const modelList = Array.isArray(modelsResult.data) ? modelsResult.data : [];
+            const chatList = sortChats(chatsResult.data || []);
+            const agentList = Array.isArray(agentsResult.data) ? agentsResult.data : [];
+            const nextSettings = {
+                globalInstructions: settingsResult.data && typeof settingsResult.data.globalInstructions === 'string' ? settingsResult.data.globalInstructions : '',
+                defaultAgentId: settingsResult.data && typeof settingsResult.data.defaultAgentId === 'string' ? settingsResult.data.defaultAgentId : '',
+            };
+
+            setModels(modelList);
+            setChats(chatList);
+            setAgents(agentList);
+            setSettings(nextSettings);
+            setSettingsDraft(nextSettings);
+
+            if (!selectedModel) {
+                const fallbackModel = (chatList[0] && chatList[0].model) || modelList[0] || '';
+                setSelectedModel(fallbackModel);
+            }
+
+            if (!activeChatId && chatList.length > 0) {
+                setActiveChatId(chatList[0].id);
+            }
+
+            if (!activeChatId) {
+                setActiveAgentId(nextSettings.defaultAgentId || '');
+            }
+        }, [activeChatId, selectedModel]);
+
+        useEffect(() => {
+            let canceled = false;
+            (async () => {
+                try {
+                    const me = await apiFetch('/auth/me');
+                    if (canceled) return;
+                    if (me.response.ok && me.data && me.data.user) {
+                        setUser(me.data.user);
+                    } else {
+                        setUser(null);
+                    }
+                } finally {
+                    if (!canceled) setBooting(false);
+                }
+            })();
+            return () => {
+                canceled = true;
+            };
+        }, []);
+
+        useEffect(() => {
+            if (!user) return;
+            loadAppData().catch(() => setError('РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РґР°РЅРЅС‹Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.'));
+        }, [user, loadAppData]);
+
+        useEffect(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, [activeChat && activeChat.messages ? activeChat.messages.length : 0, sending]);
+
+        useEffect(() => {
+            if (!activeChat) return;
+            setActiveAgentId(activeChat.agentId || settings.defaultAgentId || '');
+            if (activeChat.model) setSelectedModel(activeChat.model);
+        }, [activeChat, settings.defaultAgentId]);
+
+        const handleAuthSubmit = useCallback(
+            async (event) => {
+                event.preventDefault();
+                if (authLoading) return;
+                setAuthError('');
+                setAuthLoading(true);
+                try {
+                    const endpoint = authMode === 'login' ? '/auth/login' : '/auth/register';
+                    const result = await apiFetch(endpoint, {
+                        method: 'POST',
+                        body: JSON.stringify({ username: authUsername, password: authPassword }),
+                    });
+
+                    if (!result.response.ok) {
+                        throw new Error((result.data && result.data.error) || 'РћС€РёР±РєР° Р°РІС‚РѕСЂРёР·Р°С†РёРё.');
+                    }
+
+                    setUser(result.data.user);
+                    setAuthPassword('');
+                    setAuthError('');
+                } catch (e) {
+                    setAuthError(e.message || String(e));
+                } finally {
+                    setAuthLoading(false);
+                }
+            },
+            [authLoading, authMode, authUsername, authPassword]
+        );
+
+        const handleLogout = useCallback(async () => {
+            await apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
+            setUser(null);
+            setChats([]);
+            setActiveChatId('');
+            setInput('');
+            setError('');
+            setNotice('');
+        }, []);
+
+        const upsertChatLocal = useCallback((chat) => {
+            setChats((prev) => {
+                const idx = prev.findIndex((c) => c.id === chat.id);
+                if (idx === -1) return sortChats([chat, ...prev]);
+                const next = [...prev];
+                next[idx] = chat;
+                return sortChats(next);
+            });
+        }, []);
+
+        const persistChat = useCallback(async (chat) => {
+            const result = await apiFetch('/chats/save', { method: 'POST', body: JSON.stringify(chat) });
+            if (!result.response.ok) throw new Error((result.data && result.data.error) || 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ С‡Р°С‚.');
+            if (result.data && result.data.chat) {
+                upsertChatLocal(result.data.chat);
+            }
+        }, [upsertChatLocal]);
+
+        const handleNewChat = useCallback(() => {
+            setActiveChatId('');
+            setInput('');
+            setError('');
+            setNotice('');
+            setActiveAgentId(settings.defaultAgentId || '');
+        }, [settings.defaultAgentId]);
+
+        const handleDeleteChat = useCallback(async (chatId) => {
+            await apiFetch('/chats/' + chatId, { method: 'DELETE' }).catch(() => {});
+            setChats((prev) => prev.filter((c) => c.id !== chatId));
+            if (activeChatId === chatId) {
+                setActiveChatId('');
+                setInput('');
+            }
+        }, [activeChatId]);
+
+        const handleAgentChange = useCallback((nextAgentId) => {
+            setActiveAgentId(nextAgentId);
+            if (!activeChat) return;
+            const updated = { ...activeChat, agentId: nextAgentId, updatedAt: new Date().toISOString() };
+            upsertChatLocal(updated);
+            persistChat(updated).catch(() => setError('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЂРµР¶РёРј Р°РіРµРЅС‚Р°.'));
+        }, [activeChat, persistChat, upsertChatLocal]);
+
+        const handleSettingsSave = useCallback(async () => {
+            setSettingsSaving(true);
+            setError('');
+            try {
+                const result = await apiFetch('/user/settings', {
+                    method: 'PUT',
+                    body: JSON.stringify(settingsDraft),
+                });
+                if (!result.response.ok) {
+                    throw new Error((result.data && result.data.error) || 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё.');
+                }
+                const next = {
+                    globalInstructions: result.data.globalInstructions || '',
+                    defaultAgentId: result.data.defaultAgentId || '',
+                };
+                setSettings(next);
+                setSettingsDraft(next);
+                if (!activeChat) setActiveAgentId(next.defaultAgentId || '');
+                setSettingsOpen(false);
+                setNotice('РРЅСЃС‚СЂСѓРєС†РёРё СЃРѕС…СЂР°РЅРµРЅС‹ Рё РїСЂРёРјРµРЅСЏСЋС‚СЃСЏ РІРѕ РІСЃРµС… С‡Р°С‚Р°С….');
+            } catch (e) {
+                setError(e.message || String(e));
+            } finally {
+                setSettingsSaving(false);
+            }
+        }, [settingsDraft, activeChat]);
+
+        const sendMessage = useCallback(async () => {
+            const text = input.trim();
+            if (!text || sending || !selectedModel) return;
+
+            setSending(true);
+            setError('');
+            setNotice('');
+            setInput('');
+
+            const now = new Date().toISOString();
+            const userMessage = { role: 'user', content: text, createdAt: now };
+
+            const baseChat = activeChat
+                ? {
+                      ...activeChat,
+                      model: selectedModel,
+                      agentId: activeAgentId || '',
+                      messages: [...(activeChat.messages || []), userMessage],
+                      updatedAt: now,
+                  }
+                : {
+                      id: makeId(),
+                      title: text.slice(0, 80) || 'РќРѕРІС‹Р№ С‡Р°С‚',
+                      model: selectedModel,
+                      agentId: activeAgentId || settings.defaultAgentId || '',
+                      messages: [userMessage],
+                      createdAt: now,
+                      updatedAt: now,
+                  };
+
+            const pendingAssistant = { role: 'assistant', content: '', model: selectedModel, pending: true, createdAt: now };
+            const pendingChat = { ...baseChat, messages: [...baseChat.messages, pendingAssistant] };
+
+            upsertChatLocal(pendingChat);
+            setActiveChatId(pendingChat.id);
+
+            try {
+                const historyForApi = baseChat.messages.map((m) => ({ role: m.role, content: m.content }));
+                const result = await apiFetch('/chat', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        model: selectedModel,
+                        messages: historyForApi,
+                        chatId: baseChat.id,
+                        agentId: baseChat.agentId || '',
+                    }),
+                });
+
+                if (!result.response.ok) {
+                    throw new Error((result.data && result.data.error) || 'РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР° Рє РР.');
+                }
+
+                const assistant = {
+                    role: 'assistant',
+                    content: (result.data && result.data.response) || '',
+                    model: selectedModel,
+                    inputTokens: result.data ? result.data.inputTokens : null,
+                    outputTokens: result.data ? result.data.outputTokens : null,
+                    createdAt: new Date().toISOString(),
+                };
+
+                const finalChat = {
+                    ...baseChat,
+                    title: chatTitle(baseChat),
+                    messages: [...baseChat.messages, assistant],
+                    updatedAt: new Date().toISOString(),
+                };
+
+                await persistChat(finalChat);
+
+                if (result.data && result.data.usedFallback) {
+                    setNotice('РљРѕРЅС‚РµРєСЃС‚ Р±С‹Р» СЃРѕРєСЂР°С‰РµРЅ РґРѕ Р±РµР·РѕРїР°СЃРЅРѕРіРѕ РѕРєРЅР°. Р”РёР°Р»РѕРі РїСЂРѕРґРѕР»Р¶Р°РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ.');
+                } else if (result.data && result.data.contextTrimmed) {
+                    setNotice('Р”Р»РёРЅРЅР°СЏ РёСЃС‚РѕСЂРёСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃР¶Р°С‚Р° РґР»СЏ РїСЂРµРґРѕС‚РІСЂР°С‰РµРЅРёСЏ РѕС€РёР±РѕРє РєРѕРЅС‚РµРєСЃС‚Р°.');
+                }
+            } catch (e) {
+                const recoveredChat = { ...baseChat, title: chatTitle(baseChat), updatedAt: new Date().toISOString() };
+                upsertChatLocal(recoveredChat);
+                persistChat(recoveredChat).catch(() => {});
+                setError(e.message || String(e));
+            } finally {
+                setSending(false);
+            }
+        }, [input, sending, selectedModel, activeChat, activeAgentId, settings.defaultAgentId, persistChat, upsertChatLocal]);
+
+        const renderMessage = (msg, idx) => {
+            const isUser = msg.role === 'user';
+            const content = String(msg.content || '');
+            const html = isUser
+                ? esc(content).replace(/\n/g, '<br/>')
+                : (typeof window.renderMarkdown === 'function' ? window.renderMarkdown(content) : esc(content).replace(/\n/g, '<br/>'));
+
+            return (
+                <div key={idx} className="mb-4">
+                    <div className="text-[11px] text-gray-500 mb-1 uppercase tracking-wide">{isUser ? 'Р’С‹' : 'РР'}</div>
+                    <div className={isUser ? 'msg-user' : 'msg-ai'}>
+                        {msg.pending ? (
+                            <div className="text-sm text-gray-500">Р“РµРЅРµСЂР°С†РёСЏ РѕС‚РІРµС‚Р°...</div>
+                        ) : (
+                            <div className="md text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
+                        )}
+                        {!isUser && !msg.pending && (msg.inputTokens != null || msg.outputTokens != null) ? (
+                            <div className="text-[11px] text-gray-600 mt-2">in: {msg.inputTokens ?? '-'} | out: {msg.outputTokens ?? '-'}</div>
+                        ) : null}
+                    </div>
+                </div>
+            );
+        };
+
+        if (booting) {
+            return <LoadingScreen />;
+        }
+
+        if (!user) {
+            return (
+                <AuthScreen
+                    mode={authMode}
+                    setMode={setAuthMode}
+                    username={authUsername}
+                    setUsername={setAuthUsername}
+                    password={authPassword}
+                    setPassword={setAuthPassword}
+                    onSubmit={handleAuthSubmit}
+                    loading={authLoading}
+                    error={authError}
+                />
+            );
+        }
+
+        return (
+            <div className="flex h-screen bg-arena-bg overflow-hidden">
+                <aside className="w-[290px] border-r border-arena-border bg-arena-sidebar flex flex-col">
+                    <div className="p-3 border-b border-arena-border">
+                        <button className="w-full px-3 py-2 rounded-lg border border-arena-border text-sm text-gray-300 hover:bg-arena-hover" onClick={handleNewChat}>+ РќРѕРІС‹Р№ С‡Р°С‚</button>
+                    </div>
+
+                    <div className="agent-panel">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-500">РђРіРµРЅС‚С‹</div>
+                        <button className={'agent-chip ' + (!activeAgentId ? 'active' : '')} onClick={() => handleAgentChange('')}>Р‘РµР· Р°РіРµРЅС‚Р°</button>
+                        {agents.map((agent) => (
+                            <button
+                                key={agent.id}
+                                className={'agent-chip ' + (activeAgentId === agent.id ? 'active' : '')}
+                                onClick={() => handleAgentChange(agent.id)}
+                            >
+                                <div className="font-semibold">{agent.name}</div>
+                                <div className="text-[11px] text-gray-500 mt-1">{agent.description}</div>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="px-3 pb-2 text-[11px] text-gray-500 uppercase tracking-wider">Р’Р°С€Рё С‡Р°С‚С‹</div>
+                    <div className="flex-1 overflow-y-auto px-2 pb-3">
+                        {chats.length === 0 ? <div className="text-xs text-gray-600 px-2 py-2">Р§Р°С‚РѕРІ РїРѕРєР° РЅРµС‚</div> : null}
+                        {chats.map((chat) => (
+                            <div key={chat.id} className={'sidebar-item px-2 py-2 mb-1 cursor-pointer group ' + (activeChatId === chat.id ? 'active' : '')} onClick={() => setActiveChatId(chat.id)}>
+                                <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                        <div className="text-[13px] text-gray-300 line-clamp-2">{chatTitle(chat)}</div>
+                                        <div className="text-[11px] text-gray-600 mt-1">{formatWhen(chat.updatedAt || chat.createdAt)}</div>
+                                    </div>
+                                    <button
+                                        className="chat-delete-btn p-1 rounded hover:bg-red-900/25 text-gray-600 hover:text-red-300"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteChat(chat.id);
+                                        }}
+                                    >x
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </aside>
+
+                <main className="flex-1 flex flex-col min-w-0">
+                    <div className="h-12 border-b border-arena-border px-3 flex items-center gap-2">
+                        <select className="auth-input mb-0 max-w-xs py-2" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
+                            <option value="">Р’С‹Р±РµСЂРёС‚Рµ РјРѕРґРµР»СЊ</option>
+                            {models.map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                            ))}
+                        </select>
+                        <div className="ml-auto flex items-center">
+                            <button className="px-3 py-1.5 text-xs rounded-lg border border-arena-border text-gray-400 hover:text-gray-200 mr-2" onClick={() => setSettingsOpen(true)}>РРЅСЃС‚СЂСѓРєС†РёРё</button>
+                            <span className="header-user">@{user.username}</span>
+                            <button className="px-2 py-1.5 text-xs rounded-lg border border-arena-border text-gray-500 hover:text-gray-200" onClick={handleLogout}>Р’С‹Р№С‚Рё</button>
+                        </div>
+                    </div>
+
+                    {activeAgent ? (
+                        <div className="agent-banner">
+                            <div className="text-xs uppercase tracking-wider text-teal-200/80">Р РµР¶РёРј Р°РіРµРЅС‚Р°</div>
+                            <div className="text-sm text-teal-100 font-semibold">{activeAgent.name}</div>
+                            <div className="text-xs text-teal-100/80 mt-1">РћС‚РІРµС‚С‹ С„РѕСЂРјРёСЂСѓСЋС‚СЃСЏ СЃ Р°РіРµРЅС‚СЃРєРёРј РїСЂРѕРјРїС‚РѕРј Рё РІР°С€РёРјРё РіР»РѕР±Р°Р»СЊРЅС‹РјРё РёРЅСЃС‚СЂСѓРєС†РёСЏРјРё.</div>
+                        </div>
+                    ) : null}
+
+                    <div className="flex-1 overflow-y-auto">
+                        {activeChat ? (
+                            <div className="max-w-3xl mx-auto px-4 py-5">
+                                {activeChat.messages.map((msg, idx) => renderMessage(msg, idx))}
+                                {error ? <div className="auth-error">{error}</div> : null}
+                                {notice ? <div className="mt-2 text-xs text-teal-200 bg-teal-900/20 border border-teal-700/30 rounded-lg px-3 py-2">{notice}</div> : null}
+                                <div ref={messagesEndRef} />
+                            </div>
+                        ) : (
+                            <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+                                <div className="text-2xl text-gray-500">РќР°С‡РЅРёС‚Рµ РЅРѕРІС‹Р№ РґРёР°Р»РѕРі</div>
+                                <div className="text-sm text-gray-600 mt-2">РСЃС‚РѕСЂРёСЏ С‡Р°С‚РѕРІ Рё РёРЅСЃС‚СЂСѓРєС†РёРё РїСЂРёРІСЏР·Р°РЅС‹ Рє РІР°С€РµРјСѓ Р°РєРєР°СѓРЅС‚Сѓ.</div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="p-4 border-t border-arena-border">
+                        <div className="max-w-3xl mx-auto">
+                            <div className="input-glow relative bg-arena-input border border-arena-border rounded-2xl flex items-end">
+                                <textarea
+                                    className="flex-1 bg-transparent text-gray-200 text-sm py-3.5 px-3 max-h-40 overflow-y-auto placeholder-gray-600"
+                                    placeholder="Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ"
+                                    rows="1"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            sendMessage();
+                                        }
+                                    }}
+                                />
+                                <button
+                                    className="p-3.5 text-gray-500 hover:text-white disabled:opacity-35"
+                                    disabled={sending || !input.trim() || !selectedModel}
+                                    onClick={sendMessage}
+                                >
+                                    РћС‚РїСЂР°РІРёС‚СЊ
+                                </button>
+                            </div>
+                            <div className="text-[11px] text-gray-600 mt-2">Р•СЃР»Рё РёСЃС‚РѕСЂРёСЏ СЃС‚Р°РЅРµС‚ СЃР»РёС€РєРѕРј РґР»РёРЅРЅРѕР№, РєРѕРЅС‚РµРєСЃС‚ Р±СѓРґРµС‚ СЃР¶Р°С‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё Р±РµР· Р±Р»РѕРєРёСЂРѕРІРєРё С‡Р°С‚Р°.</div>
+                        </div>
+                    </div>
+                </main>
+
+                {settingsOpen ? (
+                    <SettingsModal
+                        draft={settingsDraft}
+                        setDraft={setSettingsDraft}
+                        agents={agents}
+                        saving={settingsSaving}
+                        onClose={() => {
+                            setSettingsOpen(false);
+                            setSettingsDraft(settings);
+                        }}
+                        onSave={handleSettingsSave}
+                    />
+                ) : null}
+            </div>
+        );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<EnhancedArenaApp />);
+})();
+'@ | Set-Content -Encoding utf8 enhanced-app.jsx

@@ -1,0 +1,911 @@
+﻿@'
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+
+const express = require("express");
+const fs = require("fs");
+const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
+
+const app = express();
+app.use(express.json({ limit: "10mb" }));
+
+const PORT = Number(process.env.PORT || 3001);
+
+const SNOWFLAKE_ACCOUNT_IDENTIFIER = String(process.env.SNOWFLAKE_ACCOUNT_IDENTIFIER || "").trim();
+const SNOWFLAKE_PAT = String(process.env.SNOWFLAKE_PAT || "").trim();
+const ADMIN_ROLE = String(process.env.ADMIN_ROLE || "ACCOUNTADMIN").trim();
+const ADMIN_WAREHOUSE = String(process.env.ADMIN_WAREHOUSE || "COMPUTE_WH").trim();
+
+const ACCOUNT_ID = SNOWFLAKE_ACCOUNT_IDENTIFIER.replace(/\/$/, "");
+const REST_API_BASE = ACCOUNT_ID ? `https://${ACCOUNT_ID}.snowflakecomputing.com/api/v2` : "";
+const SQL_API_BASE = REST_API_BASE ? `${REST_API_BASE}/statements` : "";
+
+const BASE_SYSTEM_PROMPT = "You are a powerful Human assistant.";
+const MAX_PROMPT_TOKENS = Number(process.env.MAX_PROMPT_TOKENS || 120000);
+const MAX_MESSAGE_CHARS_FOR_PROMPT = Number(process.env.MAX_MESSAGE_CHARS_FOR_PROMPT || 12000);
+const RECENT_MESSAGES_TO_KEEP = Number(process.env.RECENT_MESSAGES_TO_KEEP || 10);
+const MEMORY_SUMMARY_MAX_CHARS = Number(process.env.MEMORY_SUMMARY_MAX_CHARS || 5000);
+
+const DATA_DIR = path.join(__dirname, "data");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const CHATS_DIR = path.join(DATA_DIR, "chats");
+const SETTINGS_DIR = path.join(DATA_DIR, "settings");
+const AUTH_SECRET_FILE = path.join(DATA_DIR, "auth.secret");
+
+const AUTH_COOKIE_NAME = "arena_auth";
+const AUTH_COOKIE_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+const MODELS_FILE = path.join(__dirname, "..", "Models.txt");
+const DEFAULT_ROBLOX_PROMPT_PATH =
+    process.env.ROBLOX_AGENT_PROMPT_PATH ||
+    "C:\\Users\\lesab\\OneDrive\\\u0420\u0430\u0431\u043e\u0447\u0438\u0439 \u0441\u0442\u043e\u043b\\\u041e\u0411\u0425\u041e\u0414 \u0421\u041a\u0420\u0418\u041f\u0422\u041e\u0412.txt";
+
+const AGENTS = [
+    {
+        id: "roblox-scripts",
+        name: "\u0421\u043a\u0440\u0438\u043f\u0442\u044b \u0440\u043e\u0431\u043b\u043e\u043a\u0441",
+        description: "Specialized mode for Roblox scripting tasks.",
+        promptPath: DEFAULT_ROBLOX_PROMPT_PATH,
+        accent: "#4fd1c5",
+    },
+];
+
+const AGENT_PROMPT_CACHE = new Map();
+
+if (!SNOWFLAKE_ACCOUNT_IDENTIFIER || !SNOWFLAKE_PAT) {
+    console.warn("[WARN] SNOWFLAKE_ACCOUNT_IDENTIFIER or SNOWFLAKE_PAT is missing.");
+}
+
+ensureDir(DATA_DIR);
+ensureDir(CHATS_DIR);
+ensureDir(SETTINGS_DIR);
+
+const AUTH_JWT_SECRET = loadAuthSecret();
+
+function ensureDir(dirPath) {
+    if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+    }
+}
+
+function readJson(filePath, fallback) {
+    try {
+        if (!fs.existsSync(filePath)) return fallback;
+        const raw = fs.readFileSync(filePath, "utf8");
+        if (!raw.trim()) return fallback;
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
+    }
+}
+
+function writeJsonAtomic(filePath, data) {
+    ensureDir(path.dirname(filePath));
+    const tmpPath = `${filePath}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
+    fs.renameSync(tmpPath, filePath);
+}
+
+function loadAuthSecret() {
+    if (process.env.AUTH_JWT_SECRET) return process.env.AUTH_JWT_SECRET;
+    if (fs.existsSync(AUTH_SECRET_FILE)) {
+        const existing = fs.readFileSync(AUTH_SECRET_FILE, "utf8").trim();
+        if (existing) return existing;
+    }
+    const generated = crypto.randomBytes(48).toString("hex");
+    fs.writeFileSync(AUTH_SECRET_FILE, generated, "utf8");
+    return generated;
+}
+
+function estimateTokens(text) {
+    return Math.ceil(String(text || "").length / 4);
+}
+
+function toPromptText(value) {
+    if (typeof value === "string") return value.trim();
+    if (value == null) return "";
+    return String(value).trim();
+}
+
+function clampPromptContent(text) {
+    const value = toPromptText(text);
+    if (value.length <= MAX_MESSAGE_CHARS_FOR_PROMPT) return value;
+    return `[Truncated for context: keeping latest ${MAX_MESSAGE_CHARS_FOR_PROMPT} chars]\n` + value.slice(-MAX_MESSAGE_CHARS_FOR_PROMPT);
+}
+
+function normalizeMessages(messages) {
+    if (!Array.isArray(messages)) return [];
+    return messages
+        .map((msg) => {
+            const role = msg && msg.role === "assistant" ? "assistant" : "user";
+            const content = clampPromptContent(msg ? msg.content : "");
+            return { role, content };
+        })
+        .filter((msg) => msg.content.length > 0);
+}
+
+function trimMessages(messages, maxTokens, systemPrompt) {
+    const normalized = normalizeMessages(messages);
+    let totalTokens = estimateTokens(systemPrompt || BASE_SYSTEM_PROMPT);
+    const kept = [];
+
+    for (let i = normalized.length - 1; i >= 0; i -= 1) {
+        const item = normalized[i];
+        const itemTokens = estimateTokens(item.content);
+        if (totalTokens + itemTokens > maxTokens && kept.length > 0) break;
+        totalTokens += itemTokens;
+        kept.unshift(item);
+    }
+
+    if (kept.length === 0 && normalized.length > 0) {
+        kept.push(normalized[normalized.length - 1]);
+    }
+
+    return kept;
+}
+
+function truncateText(text, maxChars) {
+    const value = String(text || "").trim();
+    if (value.length <= maxChars) return value;
+    return `${value.slice(0, Math.max(0, maxChars - 1))}\u2026`;
+}
+
+function extractSnippet(content) {
+    const plain = String(content || "").replace(/\s+/g, " ").trim();
+    return truncateText(plain, 220);
+}
+
+function buildRollingSummary(previousSummary, messages) {
+    const normalized = normalizeMessages(messages);
+    if (normalized.length <= RECENT_MESSAGES_TO_KEEP) {
+        return truncateText(previousSummary || "", MEMORY_SUMMARY_MAX_CHARS);
+    }
+
+    const older = normalized.slice(0, -RECENT_MESSAGES_TO_KEEP);
+    const lines = older.slice(-24).map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${extractSnippet(m.content)}`);
+    const fragment = lines.join("\n");
+    const merged = [String(previousSummary || "").trim(), fragment].filter(Boolean).join("\n");
+    return truncateText(merged, MEMORY_SUMMARY_MAX_CHARS);
+}
+
+function sqlEscape(str) {
+    return String(str || "")
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "''");
+}
+
+function headersSnowflake() {
+    return {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "arena-chat/2.0",
+        Authorization: `Bearer ${SNOWFLAKE_PAT}`,
+    };
+}
+
+async function postStatement(statement) {
+    if (!SQL_API_BASE || !SNOWFLAKE_PAT) {
+        throw new Error("Snowflake is not configured.");
+    }
+
+    const body = { statement, timeout: 120, role: ADMIN_ROLE };
+    if (ADMIN_WAREHOUSE) body.warehouse = ADMIN_WAREHOUSE;
+
+    const res = await fetch(SQL_API_BASE, {
+        method: "POST",
+        headers: headersSnowflake(),
+        body: JSON.stringify(body),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (res.status === 200) return json;
+
+    if (res.status === 202) {
+        const statusUrl =
+            json.statementStatusUrl ||
+            (json.statementHandle ? `/api/v2/statements/${json.statementHandle}` : null);
+
+        if (!statusUrl) {
+            throw new Error("No statementStatusUrl in Snowflake response.");
+        }
+
+        for (let i = 0; i < 240; i += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const poll = await fetch(
+                `https://${SNOWFLAKE_ACCOUNT_IDENTIFIER}.snowflakecomputing.com${statusUrl}`,
+                { method: "GET", headers: headersSnowflake() }
+            );
+            if (poll.status === 202) continue;
+            const payload = await poll.json().catch(() => ({}));
+            if (poll.status === 200) return payload;
+            throw new Error(`Snowflake poll error ${poll.status}: ${JSON.stringify(payload)}`);
+        }
+
+        throw new Error("Timeout waiting for Snowflake statement.");
+    }
+
+    throw new Error(`Snowflake SQL API error ${res.status}: ${JSON.stringify(json)}`);
+}
+
+function parseCompletionText(raw) {
+    let text = String(raw || "");
+    try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed === "string") return parsed;
+        if (parsed && parsed.choices && parsed.choices[0]) {
+            return (
+                parsed.choices[0].messages ||
+                parsed.choices[0].message?.content ||
+                text
+            );
+        }
+    } catch {
+        // keep plain text
+    }
+    return text;
+}
+
+async function callAICompleteRaw(model, messages, systemPrompt) {
+    const fullPrompt =
+        String(systemPrompt || BASE_SYSTEM_PROMPT) +
+        "\n\n" +
+        messages
+            .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+            .join("\n\n");
+
+    const sql = `SELECT SNOWFLAKE.CORTEX.COMPLETE('${sqlEscape(model)}', '${sqlEscape(fullPrompt)}') AS RESPONSE`;
+    const result = await postStatement(sql);
+
+    if (!result.data || !result.data.length || !result.data[0].length) {
+        throw new Error("No response from model.");
+    }
+
+    return parseCompletionText(result.data[0][0]);
+}
+
+function isContextError(error) {
+    const message = String(error && error.message ? error.message : error).toLowerCase();
+    return (
+        message.includes("context") ||
+        message.includes("token") ||
+        message.includes("prompt") ||
+        message.includes("too long") ||
+        message.includes("maximum")
+    );
+}
+
+async function callAICompleteResilient(model, messages, systemPrompt) {
+    const limits = [MAX_PROMPT_TOKENS, 90000, 70000, 50000, 35000, 25000, 15000];
+    let lastContextError = null;
+
+    for (const limit of limits) {
+        const trimmed = trimMessages(messages, limit, systemPrompt);
+        try {
+            const response = await callAICompleteRaw(model, trimmed, systemPrompt);
+            return {
+                response,
+                contextTrimmed: trimmed.length < normalizeMessages(messages).length,
+                usedFallback: false,
+            };
+        } catch (error) {
+            if (!isContextError(error)) throw error;
+            lastContextError = error;
+        }
+    }
+
+    const minimal = normalizeMessages(messages).slice(-2);
+    if (minimal.length === 0) {
+        throw lastContextError || new Error("Unable to complete request.");
+    }
+
+    const fallbackPrompt = `${systemPrompt}\n\nIf full context is unavailable, answer using only available context and ask for clarification when needed.`;
+    const response = await callAICompleteRaw(model, minimal, fallbackPrompt);
+    return {
+        response,
+        contextTrimmed: true,
+        usedFallback: true,
+    };
+}
+
+async function handleSentiment(text) {
+    const sql = `SELECT SNOWFLAKE.CORTEX.SENTIMENT('${sqlEscape(text)}') AS s`;
+    const r = await postStatement(sql);
+    const score = Number.parseFloat(r.data[0][0]);
+    const label = score > 0.3 ? "Positive" : score < -0.3 ? "Negative" : "Neutral";
+    return `Sentiment score: ${Number.isFinite(score) ? score.toFixed(4) : "n/a"} (${label})`;
+}
+
+async function handleTranslate(text) {
+    let targetLang = "en";
+    const langMatch = text.match(/translate\s+(?:to|into|na|v)\s+(\w+)/i);
+    if (langMatch) {
+        const target = langMatch[1].toLowerCase();
+        targetLang = target.slice(0, 2);
+    }
+    const sql = `SELECT SNOWFLAKE.CORTEX.TRANSLATE('${sqlEscape(text)}', '', '${sqlEscape(targetLang)}') AS t`;
+    const r = await postStatement(sql);
+    return String(r.data[0][0] || "");
+}
+
+async function handleExtractAnswer(context, question) {
+    const sql = `SELECT SNOWFLAKE.CORTEX.EXTRACT_ANSWER('${sqlEscape(context)}', '${sqlEscape(question)}') AS a`;
+    const r = await postStatement(sql);
+    try {
+        const answers = JSON.parse(r.data[0][0]);
+        if (!Array.isArray(answers) || answers.length === 0) {
+            return "No answer found in the provided text.";
+        }
+        return answers
+            .map((a, i) => `Answer ${i + 1} (score: ${Number(a.score || 0).toFixed(3)}): ${a.answer}`)
+            .join("\n\n");
+    } catch {
+        return String(r.data[0][0] || "");
+    }
+}
+
+async function handleSummarize(text) {
+    const sql = `SELECT SNOWFLAKE.CORTEX.SUMMARIZE('${sqlEscape(text)}') AS s`;
+    const r = await postStatement(sql);
+    return String(r.data[0][0] || "");
+}
+
+async function handleText2SQL(text) {
+    const sqlPrompt = `You are a SQL expert. Convert the following natural language request into a valid SQL query. Only output SQL query. Request: ${text}`;
+    const sql = `SELECT SNOWFLAKE.CORTEX.AI_COMPLETE('mistral-large2', '${sqlEscape(sqlPrompt)}') AS RESPONSE`;
+    const r = await postStatement(sql);
+    const content = parseCompletionText(r.data[0][0]);
+    return `Generated SQL:\n\n\`\`\`sql\n${content}\n\`\`\``;
+}
+
+async function handleTranscribe() {
+    return "Transcription requires an audio file uploaded to a Snowflake stage. This chat endpoint accepts only text.";
+}
+
+function loadUsersDb() {
+    const db = readJson(USERS_FILE, { users: [] });
+    if (!Array.isArray(db.users)) db.users = [];
+    return db;
+}
+
+function saveUsersDb(db) {
+    writeJsonAtomic(USERS_FILE, db);
+}
+
+function normalizeUsername(value) {
+    const username = String(value || "").trim().toLowerCase();
+    if (!/^[a-z0-9_.-]{3,32}$/.test(username)) {
+        return null;
+    }
+    return username;
+}
+
+function publicUser(user) {
+    return {
+        id: user.id,
+        username: user.username,
+        createdAt: user.createdAt,
+    };
+}
+
+function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+    return `scrypt:${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+    const parts = String(stored || "").split(":");
+    if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+    const salt = parts[1];
+    const hashHex = parts[2];
+    const expected = Buffer.from(hashHex, "hex");
+    const actual = crypto.scryptSync(password, salt, 64);
+    if (expected.length !== actual.length) return false;
+    return crypto.timingSafeEqual(expected, actual);
+}
+
+function parseCookies(header) {
+    const out = {};
+    String(header || "")
+        .split(";")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => {
+            const idx = part.indexOf("=");
+            if (idx <= 0) return;
+            const key = part.slice(0, idx).trim();
+            const value = part.slice(idx + 1).trim();
+            out[key] = value;
+        });
+    return out;
+}
+
+function signAuthToken(user) {
+    return jwt.sign(
+        {
+            sub: user.id,
+            username: user.username,
+        },
+        AUTH_JWT_SECRET,
+        {
+            expiresIn: AUTH_COOKIE_TTL_SECONDS,
+        }
+    );
+}
+
+function setAuthCookie(res, token) {
+    const parts = [
+        `${AUTH_COOKIE_NAME}=${token}`,
+        "HttpOnly",
+        "Path=/",
+        "SameSite=Lax",
+        `Max-Age=${AUTH_COOKIE_TTL_SECONDS}`,
+    ];
+    if (process.env.NODE_ENV === "production") {
+        parts.push("Secure");
+    }
+    res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function clearAuthCookie(res) {
+    const parts = [
+        `${AUTH_COOKIE_NAME}=`,
+        "HttpOnly",
+        "Path=/",
+        "SameSite=Lax",
+        "Max-Age=0",
+    ];
+    if (process.env.NODE_ENV === "production") {
+        parts.push("Secure");
+    }
+    res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function getUserById(userId) {
+    const db = loadUsersDb();
+    return db.users.find((u) => u.id === userId) || null;
+}
+
+function requireAuth(req, res, next) {
+    const cookies = parseCookies(req.headers.cookie || "");
+    const token = cookies[AUTH_COOKIE_NAME];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+        const payload = jwt.verify(token, AUTH_JWT_SECRET);
+        const user = getUserById(payload.sub);
+        if (!user) {
+            clearAuthCookie(res);
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        req.user = publicUser(user);
+        next();
+    } catch {
+        clearAuthCookie(res);
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+}
+
+function getUserSettingsFile(userId) {
+    return path.join(SETTINGS_DIR, `${userId}.json`);
+}
+
+function defaultUserSettings() {
+    return {
+        globalInstructions: "",
+        defaultAgentId: "",
+    };
+}
+
+function loadUserSettings(userId) {
+    const settings = readJson(getUserSettingsFile(userId), defaultUserSettings());
+    if (typeof settings.globalInstructions !== "string") settings.globalInstructions = "";
+    if (typeof settings.defaultAgentId !== "string") settings.defaultAgentId = "";
+    return settings;
+}
+
+function saveUserSettings(userId, settings) {
+    const safe = {
+        globalInstructions: truncateText(settings.globalInstructions || "", 5000),
+        defaultAgentId: String(settings.defaultAgentId || ""),
+    };
+    writeJsonAtomic(getUserSettingsFile(userId), safe);
+    return safe;
+}
+
+function getUserChatsFile(userId) {
+    return path.join(CHATS_DIR, `${userId}.json`);
+}
+
+function loadUserChats(userId) {
+    const chats = readJson(getUserChatsFile(userId), []);
+    if (!Array.isArray(chats)) return [];
+    return chats;
+}
+
+function saveUserChats(userId, chats) {
+    writeJsonAtomic(getUserChatsFile(userId), chats);
+}
+
+function sanitizeChat(chat) {
+    const nowIso = new Date().toISOString();
+    const id = String(chat.id || "").trim();
+    if (!id) return null;
+
+    const sanitizedMessages = Array.isArray(chat.messages)
+        ? chat.messages
+              .map((m) => ({
+                  ...m,
+                  role: m && m.role === "assistant" ? "assistant" : "user",
+                  content: toPromptText(m ? m.content : ""),
+              }))
+              .filter((m) => m.content.length > 0)
+        : [];
+
+    return {
+        ...chat,
+        id,
+        title: truncateText(chat.title || "Untitled", 120),
+        model: String(chat.model || ""),
+        agentId: String(chat.agentId || ""),
+        messages: sanitizedMessages,
+        createdAt: chat.createdAt || nowIso,
+        updatedAt: nowIso,
+        serverMemorySummary: String(chat.serverMemorySummary || ""),
+    };
+}
+
+function upsertUserChat(userId, chatInput) {
+    const chat = sanitizeChat(chatInput);
+    if (!chat) {
+        throw new Error("Invalid chat payload.");
+    }
+
+    const chats = loadUserChats(userId);
+    const index = chats.findIndex((c) => c.id === chat.id);
+    const existing = index >= 0 ? chats[index] : null;
+
+    const previousSummary = existing ? String(existing.serverMemorySummary || "") : "";
+    chat.serverMemorySummary = buildRollingSummary(previousSummary, chat.messages);
+
+    if (existing && existing.createdAt && !chat.createdAt) {
+        chat.createdAt = existing.createdAt;
+    }
+
+    if (index >= 0) chats[index] = chat;
+    else chats.push(chat);
+
+    saveUserChats(userId, chats);
+    return chat;
+}
+
+function deleteUserChat(userId, chatId) {
+    const chats = loadUserChats(userId);
+    const next = chats.filter((c) => c.id !== chatId);
+    saveUserChats(userId, next);
+}
+
+function getAgentById(agentId) {
+    return AGENTS.find((a) => a.id === agentId) || null;
+}
+
+function readAgentPrompt(agent) {
+    const filePath = agent.promptPath;
+    try {
+        const stat = fs.statSync(filePath);
+        const cached = AGENT_PROMPT_CACHE.get(filePath);
+        if (cached && cached.mtimeMs === stat.mtimeMs) {
+            return cached.content;
+        }
+        const content = fs.readFileSync(filePath, "utf8").trim();
+        AGENT_PROMPT_CACHE.set(filePath, { mtimeMs: stat.mtimeMs, content });
+        return content;
+    } catch {
+        return "";
+    }
+}
+
+function buildSystemPrompt({ globalInstructions, agentInstruction, memorySummary }) {
+    const parts = [BASE_SYSTEM_PROMPT];
+
+    const globalText = truncateText(globalInstructions || "", 5000);
+    if (globalText) {
+        parts.push(`Global user instructions:\n${globalText}`);
+    }
+
+    const agentText = truncateText(agentInstruction || "", 10000);
+    if (agentText) {
+        parts.push(`Active agent instruction:\n${agentText}`);
+    }
+
+    const memoryText = truncateText(memorySummary || "", MEMORY_SUMMARY_MAX_CHARS);
+    if (memoryText) {
+        parts.push(`Conversation memory summary:\n${memoryText}`);
+    }
+
+    return parts.join("\n\n");
+}
+
+function getModels() {
+    try {
+        const content = fs.readFileSync(MODELS_FILE, "utf8");
+        return content
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+    } catch {
+        return ["mistral-large2", "llama3.1-70b", "snowflake-arctic"];
+    }
+}
+
+async function generateModelResponse(model, messages, systemPrompt) {
+    const ml = String(model || "").toLowerCase();
+    const normalized = normalizeMessages(messages);
+    const lastUser = normalized.filter((m) => m.role === "user").pop()?.content || "";
+    const prevContext = normalized.slice(0, -1).map((m) => m.content).join("\n");
+
+    if (ml === "arctic-sentiment") {
+        return { response: await handleSentiment(lastUser), contextTrimmed: false, usedFallback: false };
+    }
+    if (ml === "arctic-translate") {
+        return { response: await handleTranslate(lastUser), contextTrimmed: false, usedFallback: false };
+    }
+    if (ml === "arctic-extract-answer" || ml === "arctic-extract") {
+        const doc = prevContext || lastUser;
+        return { response: await handleExtractAnswer(doc, lastUser), contextTrimmed: false, usedFallback: false };
+    }
+    if (ml === "arctic-parse-document") {
+        return { response: await handleSummarize(lastUser), contextTrimmed: false, usedFallback: false };
+    }
+    if (ml === "arctic-text2sql" || ml === "arctic-text2sql-r1.5") {
+        return { response: await handleText2SQL(lastUser), contextTrimmed: false, usedFallback: false };
+    }
+    if (ml === "arctic-transcribe") {
+        return { response: await handleTranscribe(), contextTrimmed: false, usedFallback: false };
+    }
+
+    return callAICompleteResilient(ml, normalized, systemPrompt);
+}
+
+const apiRouter = express.Router();
+
+apiRouter.get("/health", (req, res) => {
+    res.json({ ok: true });
+});
+
+apiRouter.post("/auth/register", (req, res) => {
+    const username = normalizeUsername(req.body && req.body.username);
+    const password = String((req.body && req.body.password) || "");
+
+    if (!username) {
+        return res.status(400).json({ error: "Username must be 3-32 chars: a-z, 0-9, _, -, ." });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters." });
+    }
+
+    const db = loadUsersDb();
+    if (db.users.some((u) => u.username === username)) {
+        return res.status(409).json({ error: "Username is already taken." });
+    }
+
+    const user = {
+        id: crypto.randomUUID(),
+        username,
+        passwordHash: hashPassword(password),
+        createdAt: new Date().toISOString(),
+    };
+
+    db.users.push(user);
+    saveUsersDb(db);
+    saveUserSettings(user.id, defaultUserSettings());
+    saveUserChats(user.id, []);
+
+    const token = signAuthToken(user);
+    setAuthCookie(res, token);
+
+    return res.json({ user: publicUser(user) });
+});
+
+apiRouter.post("/auth/login", (req, res) => {
+    const username = normalizeUsername(req.body && req.body.username);
+    const password = String((req.body && req.body.password) || "");
+
+    if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required." });
+    }
+
+    const db = loadUsersDb();
+    const user = db.users.find((u) => u.username === username);
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+        return res.status(401).json({ error: "Invalid credentials." });
+    }
+
+    const token = signAuthToken(user);
+    setAuthCookie(res, token);
+
+    return res.json({ user: publicUser(user) });
+});
+
+apiRouter.post("/auth/logout", (req, res) => {
+    clearAuthCookie(res);
+    return res.json({ success: true });
+});
+
+apiRouter.get("/auth/me", requireAuth, (req, res) => {
+    return res.json({ user: req.user });
+});
+
+apiRouter.use(requireAuth);
+
+apiRouter.get("/agents", (req, res) => {
+    const payload = AGENTS.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        promptPath: agent.promptPath,
+        accent: agent.accent,
+    }));
+    res.json(payload);
+});
+
+apiRouter.get("/user/settings", (req, res) => {
+    const settings = loadUserSettings(req.user.id);
+    res.json(settings);
+});
+
+apiRouter.put("/user/settings", (req, res) => {
+    const current = loadUserSettings(req.user.id);
+    const next = {
+        ...current,
+        globalInstructions:
+            req.body && typeof req.body.globalInstructions === "string"
+                ? req.body.globalInstructions
+                : current.globalInstructions,
+        defaultAgentId:
+            req.body && typeof req.body.defaultAgentId === "string"
+                ? req.body.defaultAgentId
+                : current.defaultAgentId,
+    };
+
+    if (next.defaultAgentId && !getAgentById(next.defaultAgentId)) {
+        return res.status(400).json({ error: "Unknown agent id." });
+    }
+
+    const saved = saveUserSettings(req.user.id, next);
+    res.json(saved);
+});
+
+apiRouter.get("/models", (req, res) => {
+    res.json(getModels());
+});
+
+apiRouter.get("/chats", (req, res) => {
+    const chats = loadUserChats(req.user.id).sort((a, b) => {
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+    });
+    res.json(chats);
+});
+
+apiRouter.post("/chats/save", (req, res) => {
+    try {
+        const chat = upsertUserChat(req.user.id, req.body || {});
+        res.json({ success: true, chat });
+    } catch (error) {
+        res.status(400).json({ error: error.message || "Invalid chat payload." });
+    }
+});
+
+apiRouter.delete("/chats/:id", (req, res) => {
+    deleteUserChat(req.user.id, String(req.params.id || ""));
+    res.json({ success: true });
+});
+
+apiRouter.post("/chat", async (req, res) => {
+    try {
+        const model = String(req.body && req.body.model ? req.body.model : "").trim();
+        const rawMessages = req.body && req.body.messages;
+        const chatId = String((req.body && req.body.chatId) || "").trim();
+        const requestedAgentId = String((req.body && req.body.agentId) || "").trim();
+
+        if (!model || !Array.isArray(rawMessages)) {
+            return res.status(400).json({ error: "model and messages are required." });
+        }
+
+        const settings = loadUserSettings(req.user.id);
+        const chats = loadUserChats(req.user.id);
+        const chat = chatId ? chats.find((c) => c.id === chatId) : null;
+
+        const activeAgentId = requestedAgentId || (chat ? chat.agentId : "") || settings.defaultAgentId || "";
+        const activeAgent = activeAgentId ? getAgentById(activeAgentId) : null;
+        const agentInstruction = activeAgent ? readAgentPrompt(activeAgent) : "";
+        const memorySummary = chat ? String(chat.serverMemorySummary || "") : "";
+
+        const systemPrompt = buildSystemPrompt({
+            globalInstructions: settings.globalInstructions,
+            agentInstruction,
+            memorySummary,
+        });
+
+        const generated = await generateModelResponse(model, rawMessages, systemPrompt);
+        const inputTokens = estimateTokens(normalizeMessages(rawMessages).map((m) => m.content).join("\n"));
+        const outputTokens = estimateTokens(generated.response);
+
+        return res.json({
+            response: generated.response,
+            inputTokens,
+            outputTokens,
+            contextTrimmed: Boolean(generated.contextTrimmed),
+            usedFallback: Boolean(generated.usedFallback),
+        });
+    } catch (error) {
+        console.error("[chat]", error);
+        return res.status(500).json({ error: error.message || String(error) });
+    }
+});
+
+apiRouter.post("/chat/regenerate", async (req, res) => {
+    try {
+        const model = String(req.body && req.body.model ? req.body.model : "").trim();
+        const rawMessages = req.body && req.body.messages;
+        const chatId = String((req.body && req.body.chatId) || "").trim();
+        const requestedAgentId = String((req.body && req.body.agentId) || "").trim();
+
+        if (!model || !Array.isArray(rawMessages)) {
+            return res.status(400).json({ error: "model and messages are required." });
+        }
+
+        const settings = loadUserSettings(req.user.id);
+        const chats = loadUserChats(req.user.id);
+        const chat = chatId ? chats.find((c) => c.id === chatId) : null;
+
+        const activeAgentId = requestedAgentId || (chat ? chat.agentId : "") || settings.defaultAgentId || "";
+        const activeAgent = activeAgentId ? getAgentById(activeAgentId) : null;
+        const agentInstruction = activeAgent ? readAgentPrompt(activeAgent) : "";
+        const memorySummary = chat ? String(chat.serverMemorySummary || "") : "";
+
+        const systemPrompt = buildSystemPrompt({
+            globalInstructions: settings.globalInstructions,
+            agentInstruction,
+            memorySummary,
+        });
+
+        const generated = await callAICompleteResilient(model.toLowerCase(), rawMessages, systemPrompt);
+        const inputTokens = estimateTokens(normalizeMessages(rawMessages).map((m) => m.content).join("\n"));
+        const outputTokens = estimateTokens(generated.response);
+
+        return res.json({
+            response: generated.response,
+            inputTokens,
+            outputTokens,
+            contextTrimmed: Boolean(generated.contextTrimmed),
+            usedFallback: Boolean(generated.usedFallback),
+        });
+    } catch (error) {
+        console.error("[regenerate]", error);
+        return res.status(500).json({ error: error.message || String(error) });
+    }
+});
+
+app.use("/api", apiRouter);
+app.use("/ai/api", apiRouter);
+
+app.use(express.static(__dirname));
+app.use("/ai", express.static(__dirname));
+
+function sendIndex(req, res) {
+    res.sendFile(path.join(__dirname, "index.html"));
+}
+
+app.get("/", sendIndex);
+app.get("/ai", sendIndex);
+app.get("/ai/*", sendIndex);
+
+app.listen(PORT, () => {
+    console.log(`arena server running on http://localhost:${PORT}`);
+});
+'@ | Set-Content -Encoding UTF8 server.js
